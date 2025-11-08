@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation"
 import { cookies } from "next/headers"
-import { DashboardContent } from "@/components/dashboard-content"
+import { DashboardUploadPage } from "@/components/dashboard-upload-page"
 
 export default async function DashboardPage() {
   const cookieStore = await cookies()
@@ -10,5 +10,5 @@ export default async function DashboardPage() {
     redirect("/login")
   }
 
-  return <DashboardContent />
+  return <DashboardUploadPage />
 }

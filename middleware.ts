@@ -7,8 +7,13 @@ const secret = new TextEncoder().encode(process.env.JWT_SECRET || "your-secret-k
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Allow public routes
-  if (pathname === "/login" || pathname.startsWith("/api/auth/login")) {
+  if (
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname.startsWith("/api/auth/login") ||
+    pathname.startsWith("/_vercel") ||
+    pathname.startsWith("/_next")
+  ) {
     return NextResponse.next()
   }
 
