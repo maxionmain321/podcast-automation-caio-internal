@@ -265,15 +265,25 @@ Body:
 
 **Note**: The app automatically polls for transcript updates every 2 seconds after redirecting to the transcript page, so both synchronous and asynchronous approaches work.
 
-### 2. Generate Webhook
+### 2. Generate Webhook (Asynchronous)
+
+**⚠️ IMPORTANT**: The content generation workflow is **asynchronous** to handle long-running AI processing that may take several minutes.
 
 **Endpoint**: `N8N_GENERATE_WEBHOOK`
 
-**Request Format**:
+**How It Works**:
+1. App triggers n8n webhook and returns immediately
+2. UI shows "Processing..." state and polls for completion
+3. n8n processes content (can take 1-5 minutes)
+4. n8n POSTs completed content to callback endpoint
+5. UI detects completion and displays results
+
+**Request Format (App → n8n)**:
 \`\`\`json
 {
   "transcript_text": "Full transcript...",
   "episode_title": "Episode Title",
+  "workflow_id": "workflow_1234567890_abc123",
   "metadata": {
     "transcript_length": 5000,
     "word_count": 850
@@ -281,14 +291,81 @@ Body:
 }
 \`\`\`
 
-**Response Format**:
+**Response Format (n8n → Callback Endpoint)**:
+
+Your n8n workflow MUST POST the results to:
+- **URL**: `https://your-app-url.vercel.app/api/webhook/generate-callback`
+- **Method**: POST
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-Callback-Secret: your-callback-secret` (optional but recommended)
+
+**Callback Payload**:
 \`\`\`json
 {
-  "seo_title": "SEO-Optimized Episode Title",
-  "blog_post_html": "<h1>Title</h1><p>Content...</p>",
-  "show_notes_html": "<ul><li>Note 1</li><li>Note 2</li></ul>"
+  "workflow_id": "workflow_1234567890_abc123",
+  "success": true,
+  "titles": {
+    "blog_titles": [
+      "Title Option 1",
+      "Title Option 2",
+      "Title Option 3",
+      "Title Option 4",
+      "Title Option 5"
+    ],
+    "podcast_titles": [
+      "Podcast Title 1",
+      "Podcast Title 2",
+      "Podcast Title 3",
+      "Podcast Title 4",
+      "Podcast Title 5"
+    ]
+  },
+  "blog_post": {
+    "markdown": "# Blog Post\n\nContent here...",
+    "word_count": 1500,
+    "reading_time": "7 min"
+  },
+  "show_notes": {
+    "episode_summary": "Summary text...",
+    "key_topics_discussed": ["Topic 1", "Topic 2"],
+    "key_takeaways": ["Takeaway 1", "Takeaway 2"],
+    "notable_quotes": ["Quote 1", "Quote 2"],
+    "timestamps": [
+      {
+        "time": "00:00",
+        "topic": "Introduction",
+        "description": "Brief intro"
+      }
+    ]
+  },
+  "metadata": {
+    "primary_keyword": "main keyword",
+    "secondary_keywords": ["keyword1", "keyword2"]
+  }
 }
 \`\`\`
+
+**n8n Workflow Setup**:
+1. **Webhook Trigger**: Receive the initial request with `workflow_id`
+2. **AI Processing**: Generate content (this can take minutes)
+3. **HTTP Request Node**: POST results to callback endpoint
+   - URL: `https://your-app.vercel.app/api/webhook/generate-callback`
+   - Method: POST
+   - Body: Include all fields from callback payload above
+   - **Critical**: Include the same `workflow_id` from step 1
+
+**Client-Side Polling**:
+- The UI polls localStorage every 3 seconds
+- Maximum polling time: 5 minutes
+- User sees "Generating content..." with spinner
+- Toast notification when content is ready
+
+**Why Asynchronous?**:
+- AI content generation can take 1-5 minutes
+- Vercel function timeout is 60 seconds on free tier
+- Cloudflare times out long-running requests (524 error)
+- Asynchronous approach prevents timeouts and improves UX
 
 ### 3. Publish Webhook
 
@@ -299,7 +376,7 @@ Body:
 {
   "seo_title": "Episode Title",
   "blog_post_html": "<h1>Title</h1><p>Content...</p>",
-  "show_notes_html": "<ul><li>Note 1</li></ul>",
+  "show_notes_html": "<ul><li>Note 1</li><li>Note 2</li></ul>",
   "wordpress_category": "Podcast",
   "tags": ["podcast", "episode"],
   "publish_immediately": true

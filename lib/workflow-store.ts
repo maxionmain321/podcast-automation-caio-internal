@@ -92,3 +92,17 @@ export function deleteWorkflow(id: string): void {
   const filtered = workflows.filter((w) => w.id !== id)
   localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered))
 }
+
+export function updateGeneratedContent(workflowId: string, content: any): void {
+  const workflow = getWorkflow(workflowId)
+  if (!workflow) {
+    console.error("[v0] Workflow not found:", workflowId)
+    return
+  }
+
+  workflow.generatedContent = content
+  workflow.updatedAt = new Date()
+
+  saveWorkflow(workflow)
+  console.log("[v0] Updated workflow with generated content:", workflowId)
+}

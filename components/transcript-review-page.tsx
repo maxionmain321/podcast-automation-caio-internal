@@ -31,6 +31,8 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
     blogPostMarkdown?: string
     showNotesMarkdown?: string
   }>({})
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [pollingForContent, setPollingForContent] = useState(false)
 
   useEffect(() => {
     const loadedWorkflow = getWorkflow(workflowId)
@@ -92,6 +94,37 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
     }
   }, [workflow, router])
 
+  useEffect(() => {
+    if (pollingForContent) {
+      const pollInterval = setInterval(() => {
+        const updatedWorkflow = getWorkflow(workflowId)
+        console.log("[v0] Polling for generated content...", !!updatedWorkflow?.generatedContent)
+
+        if (updatedWorkflow?.generatedContent) {
+          console.log("[v0] Generated content found!")
+          setWorkflow(updatedWorkflow)
+          setPollingForContent(false)
+          setGenerating(false)
+          clearInterval(pollInterval)
+
+          toast({
+            title: "Content generated!",
+            description: "Your blog post and show notes are ready.",
+          })
+        }
+      }, 3000) // Poll every 3 seconds
+
+      setTimeout(() => {
+        clearInterval(pollInterval)
+        setPollingForContent(false)
+        setGenerating(false)
+        setError("Content generation is taking longer than expected. Please try regenerating.")
+      }, 300000) // Stop polling after 5 minutes
+
+      return () => clearInterval(pollInterval)
+    }
+  }, [pollingForContent, workflowId])
+
   if (!workflow) {
     return null
   }
@@ -126,6 +159,7 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
         body: JSON.stringify({
           transcript_text: workflow.transcript,
           episode_title: episodeTitle || "Untitled Episode",
+          workflow_id: workflowId, // Send workflow ID
           metadata: {
             transcript_length: workflow.transcript.length,
             word_count: workflow.transcript.split(/\s+/).length,
@@ -140,18 +174,27 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
 
       const data = await response.json()
 
-      const updatedWorkflow = {
-        ...workflow,
-        generatedContent: data,
+      if (data.status === "processing") {
+        console.log("[v0] Content generation started, polling for results...")
+        setPollingForContent(true)
+        toast({
+          title: "Generating content...",
+          description: "This may take 1-2 minutes. You'll be notified when it's ready.",
+        })
+      } else {
+        const updatedWorkflow = {
+          ...workflow,
+          generatedContent: data,
+        }
+        setWorkflow(updatedWorkflow)
+        saveWorkflow(updatedWorkflow)
+        setGenerating(false)
       }
-
-      setWorkflow(updatedWorkflow)
-      saveWorkflow(updatedWorkflow)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Content generation failed"
       setError(errorMessage)
-    } finally {
       setGenerating(false)
+      setPollingForContent(false)
     }
   }
 
@@ -439,12 +482,28 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
                     Generated
                   </Badge>
                 )}
+                {pollingForContent && (
+                  <Badge variant="outline">
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    Processing...
+                  </Badge>
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {pollingForContent && (
+                <Alert>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <AlertDescription>
+                    Generating content with AI... This typically takes 1-2 minutes. You can wait here or come back
+                    later.
+                  </AlertDescription>
                 </Alert>
               )}
 
