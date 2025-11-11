@@ -43,11 +43,31 @@ export async function POST(request: NextRequest) {
 
     const rawData = await response.json()
 
+    console.log("[v0] n8n raw response:", JSON.stringify(rawData, null, 2))
+
     const data = Array.isArray(rawData) ? rawData[0] : rawData
 
+    console.log("[v0] Parsed data structure:", {
+      hasSuccess: !!data.success,
+      hasTitles: !!data.titles,
+      hasBlogPost: !!data.blog_post,
+      hasShowNotes: !!data.show_notes,
+    })
+
     if (!data.success || !data.titles || !data.blog_post || !data.show_notes) {
-      console.error("Invalid n8n response structure:", data)
-      throw new Error("Invalid response from content generation service")
+      console.error("[v0] Invalid n8n response structure:", JSON.stringify(data, null, 2))
+      return NextResponse.json(
+        {
+          error: "Invalid response from content generation service",
+          details: {
+            hasSuccess: !!data.success,
+            hasTitles: !!data.titles,
+            hasBlogPost: !!data.blog_post,
+            hasShowNotes: !!data.show_notes,
+          },
+        },
+        { status: 500 },
+      )
     }
 
     return NextResponse.json({
