@@ -87,33 +87,66 @@ export function UploadCard({ onUploadComplete, addLogEntry }: UploadCardProps) {
     try {
       console.log("[v0] Starting upload for:", file.name)
 
-      console.log("[v0] Uploading file via server proxy...")
+      const isLargeFile = file.size > 500 * 1024 * 1024 // 500MB
+      if (isLargeFile) {
+        console.log("[v0] Large file detected, CORS must be configured on R2")
+      }
+
+      console.log("[v0] Getting presigned URL...")
       setUploadProgress(10)
 
-      const uploadResponse = await fetch("/api/upload", {
-        method: "PUT",
-        body: file,
+      const presignedResponse = await fetch("/api/upload", {
+        method: "POST",
         headers: {
-          "Content-Type": file.type,
-          "X-Filename": file.name,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+        }),
       })
 
-      console.log("[v0] Upload response status:", uploadResponse.status)
-      setUploadProgress(70)
+      console.log("[v0] Presigned URL response status:", presignedResponse.status)
 
-      if (!uploadResponse.ok) {
-        let errorMsg = "Failed to upload file"
+      if (!presignedResponse.ok) {
+        let errorMsg = "Failed to get upload URL"
         try {
-          const errorData = await uploadResponse.json()
+          const errorData = await presignedResponse.json()
           errorMsg = errorData.error || errorMsg
         } catch {
-          errorMsg = uploadResponse.statusText || errorMsg
+          errorMsg = presignedResponse.statusText || errorMsg
         }
         throw new Error(errorMsg)
       }
 
-      const { fileUrl } = await uploadResponse.json()
+      const { uploadUrl, fileUrl } = await presignedResponse.json()
+      console.log("[v0] Got presigned URL, uploading directly to R2...")
+      setUploadProgress(20)
+
+      try {
+        const uploadToR2 = await fetch(uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: {
+            "Content-Type": file.type,
+          },
+        })
+
+        console.log("[v0] R2 upload response status:", uploadToR2.status)
+        setUploadProgress(70)
+
+        if (!uploadToR2.ok) {
+          throw new Error("Failed to upload file to storage")
+        }
+      } catch (uploadError) {
+        console.error("[v0] R2 upload error:", uploadError)
+        throw new Error(
+          "Failed to upload to R2. This is likely a CORS configuration issue. " +
+            "Please configure CORS on your R2 bucket following the R2_SETUP.md guide, or use smaller files (<500MB) " +
+            "that can be proxied through the server.",
+        )
+      }
+
       console.log("[v0] Upload successful! File URL:", fileUrl)
       setUploadProgress(80)
 
