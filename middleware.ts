@@ -11,6 +11,7 @@ export async function middleware(request: NextRequest) {
     pathname === "/" ||
     pathname === "/login" ||
     pathname.startsWith("/api/auth/login") ||
+    pathname.startsWith("/api/webhook") ||
     pathname.startsWith("/_vercel") ||
     pathname.startsWith("/_next")
   ) {

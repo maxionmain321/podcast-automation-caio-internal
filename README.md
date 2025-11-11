@@ -209,7 +209,7 @@ wrangler r2 bucket cors get <BUCKET_NAME>
 **Request Format**:
 \`\`\`json
 {
-  "file_url": "https://bucket.account-id.r2.cloudflarestorage.com/file.mp3",
+  "audio_url": "https://bucket.account-id.r2.cloudflarestorage.com/file.mp3",
   "episode_title": "Episode Title",
   "metadata": {
     "filename": "file.mp3",
@@ -218,30 +218,52 @@ wrangler r2 bucket cors get <BUCKET_NAME>
 }
 \`\`\`
 
-**Response Format** (Option A - Immediate):
+**Response Format** (Synchronous - Recommended):
 \`\`\`json
 {
-  "transcript": "Full transcript text here..."
-}
-\`\`\`
-
-**Response Format** (Option B - Async with polling):
-\`\`\`json
-{
-  "jobId": "unique-job-id",
-  "status": "queued"
-}
-\`\`\`
-
-If using Option B, your n8n workflow should call back to:
-`POST /api/webhook/transcribe-callback`
-\`\`\`json
-{
-  "jobId": "unique-job-id",
-  "transcript": "Full transcript text...",
+  "success": true,
+  "transcript": "Full transcript text here...",
+  "episode_title": "Episode Title",
+  "transcription_id": "unique-id",
+  "metadata": {...},
   "status": "completed"
 }
 \`\`\`
+
+**Alternative: Asynchronous with Callback**
+
+If your transcription takes a long time, you can return immediately and POST the result later:
+
+Initial Response:
+\`\`\`json
+{
+  "jobId": "unique-job-id",
+  "status": "processing"
+}
+\`\`\`
+
+Then at the end of your n8n workflow, POST to:
+`POST https://your-app-url.vercel.app/api/webhook/transcribe-callback`
+
+With headers:
+\`\`\`
+X-Callback-Secret: your-callback-secret
+Content-Type: application/json
+\`\`\`
+
+Body:
+\`\`\`json
+{
+  "transcript_text": "Full transcript text here...",
+  "episode_title": "Episode Title",
+  "transcription_id": "unique-id",
+  "metadata": {...},
+  "status": "completed",
+  "jobId": "unique-job-id"
+}
+\`\`\`
+
+**Note**: The app automatically polls for transcript updates every 2 seconds after redirecting to the transcript page, so both synchronous and asynchronous approaches work.
 
 ### 2. Generate Webhook
 
@@ -303,14 +325,14 @@ curl -X POST http://localhost:3000/api/webhook/transcribe \
   -H "Content-Type: application/json" \
   -H "Cookie: session=YOUR_SESSION_TOKEN" \
   -d '{
-    "file_url": "https://example.com/test.mp3",
+    "audio_url": "https://example.com/test.mp3",
     "episode_title": "Test Episode"
   }'
 
 # Using httpie
 http POST localhost:3000/api/webhook/transcribe \
   Cookie:session=YOUR_SESSION_TOKEN \
-  file_url="https://example.com/test.mp3" \
+  audio_url="https://example.com/test.mp3" \
   episode_title="Test Episode"
 \`\`\`
 

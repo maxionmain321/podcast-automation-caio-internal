@@ -10,10 +10,26 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { seo_title, blog_post_html, show_notes_html, wordpress_category, tags, publish_immediately } = body
+    const {
+      seo_title,
+      blog_post_markdown,
+      primary_keyword,
+      secondary_keywords,
+      wordpress_category,
+      tags,
+      publish_immediately,
+    } = body
 
-    if (!seo_title || !blog_post_html) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    console.log("[v0] Publish request received:", {
+      seo_title,
+      blog_post_length: blog_post_markdown?.length || 0,
+      primary_keyword,
+      secondary_keywords,
+    })
+
+    if (!seo_title || !blog_post_markdown) {
+      console.log("[v0] Missing required fields:", { seo_title: !!seo_title, blog_post_markdown: !!blog_post_markdown })
+      return NextResponse.json({ error: "Missing required fields: seo_title and blog_post_markdown" }, { status: 400 })
     }
 
     const webhookUrl = process.env.N8N_PUBLISH_WEBHOOK
@@ -32,8 +48,9 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         seo_title,
-        blog_post_html,
-        show_notes_html,
+        blog_post_markdown,
+        primary_keyword,
+        secondary_keywords,
         wordpress_category: wordpress_category || "Podcast",
         tags: tags || [],
         publish_immediately: publish_immediately !== false,

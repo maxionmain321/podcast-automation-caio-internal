@@ -10,12 +10,19 @@ type WorkflowData = {
     size: number
   } | null
   transcript: string
+  episodeTitle?: string
+  transcriptionId?: string
   transcriptApproved: boolean
   generatedContent: {
     seoTitle: string
     blogPostHtml: string
     showNotesHtml: string
   } | null
+  selectedContent?: {
+    seoTitle?: string
+    blogPostMarkdown?: string
+    showNotesHtml?: string
+  }
   activityLog: Array<{
     id: string
     timestamp: Date
@@ -66,8 +73,11 @@ export function createWorkflow(): WorkflowData {
     id: `workflow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     uploadedFile: null,
     transcript: "",
+    episodeTitle: undefined,
+    transcriptionId: undefined,
     transcriptApproved: false,
     generatedContent: null,
+    selectedContent: undefined,
     activityLog: [],
     createdAt: new Date(),
     updatedAt: new Date(),

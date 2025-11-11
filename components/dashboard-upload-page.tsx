@@ -7,7 +7,7 @@ import { UploadCard } from "@/components/upload-card"
 import { TranscriptionCard } from "@/components/transcription-card"
 import { ActivityLog } from "@/components/activity-log"
 import { DashboardHeader } from "@/components/dashboard-header"
-import { createWorkflow, saveWorkflow, type WorkflowData } from "@/lib/workflow-store"
+import { createWorkflow, saveWorkflow, getWorkflow, type WorkflowData } from "@/lib/workflow-store"
 import type { ActivityLogEntry } from "@/components/dashboard-content"
 
 export function DashboardUploadPage() {
@@ -38,25 +38,48 @@ export function DashboardUploadPage() {
     saveWorkflow(updatedWorkflow)
   }
 
-  const handleUploadComplete = (file: { url: string; filename: string; size: number }) => {
+  const handleUploadComplete = (file: { url: string; filename: string; size: number; webhookData?: any }) => {
     if (!workflow) return
+
+    console.log("[v0] handleUploadComplete called with webhookData:", file.webhookData)
+
+    let transcriptText = ""
+    let episodeTitle = file.filename
+
+    if (file.webhookData) {
+      if (file.webhookData.transcript) {
+        transcriptText = file.webhookData.transcript
+        episodeTitle = file.webhookData.episode_title || file.filename
+      }
+      // Check if it's an array format
+      else if (Array.isArray(file.webhookData) && file.webhookData.length > 0) {
+        const webhookResult = file.webhookData[0]
+        transcriptText = webhookResult.transcript_text || webhookResult.transcript || ""
+        episodeTitle = webhookResult.episode_title || file.filename
+      }
+      console.log("[v0] Extracted transcript length:", transcriptText.length, "Episode title:", episodeTitle)
+    }
 
     const updatedWorkflow = {
       ...workflow,
-      uploadedFile: file,
-      transcript: "",
+      uploadedFile: { url: file.url, filename: file.filename, size: file.size },
+      transcript: transcriptText,
+      episodeTitle,
       transcriptApproved: false,
       generatedContent: null,
     }
 
+    console.log("[v0] Saving workflow with transcript length:", updatedWorkflow.transcript.length)
     setWorkflow(updatedWorkflow)
     saveWorkflow(updatedWorkflow)
 
-    addLogEntry({
-      type: "upload",
-      message: `File uploaded: ${file.filename}`,
-      details: file,
-    })
+    const verified = getWorkflow(workflow.id)
+    console.log("[v0] Verification after save - transcript length:", verified?.transcript?.length || 0)
+
+    console.log("[v0] Redirecting to transcript page:", `/transcript/${workflow.id}`)
+    setTimeout(() => {
+      router.push(`/transcript/${workflow.id}`)
+    }, 100)
   }
 
   const handleTranscriptReceived = (text: string) => {

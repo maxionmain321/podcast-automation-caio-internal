@@ -10,10 +10,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { file_url, episode_title, metadata } = body
+    const { audio_url, file_url, episode_title, metadata } = body
+    const audioUrl = audio_url || file_url
 
-    if (!file_url) {
-      return NextResponse.json({ error: "Missing file_url" }, { status: 400 })
+    if (!audioUrl) {
+      return NextResponse.json({ error: "Missing audio_url or file_url" }, { status: 400 })
     }
 
     const webhookUrl = process.env.N8N_TRANSCRIBE_WEBHOOK
@@ -23,7 +24,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Transcription webhook not configured" }, { status: 500 })
     }
 
-    // Proxy request to n8n webhook
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: {
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
         ...(webhookSecret && { "X-Webhook-Secret": webhookSecret }),
       },
       body: JSON.stringify({
-        file_url,
+        audio_url: audioUrl,
         episode_title,
         metadata,
       }),

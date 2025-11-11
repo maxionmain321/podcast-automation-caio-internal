@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// This endpoint receives callbacks from n8n with completed transcripts
+export const runtime = "nodejs"
+
 export async function POST(request: NextRequest) {
   try {
     // Verify callback secret
@@ -11,21 +12,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid callback secret" }, { status: 401 })
     }
 
-    const { jobId, transcript, status, error } = await request.json()
+    const body = await request.json()
+    console.log("[v0] Transcribe callback received:", JSON.stringify(body, null, 2))
 
-    if (!jobId) {
-      return NextResponse.json({ error: "Missing jobId" }, { status: 400 })
+    const transcriptData = Array.isArray(body) ? body[0] : body
+
+    const { transcript_text, transcript, episode_title, transcription_id, metadata, status, jobId } = transcriptData
+
+    const finalTranscript = transcript_text || transcript
+
+    if (!finalTranscript && !jobId) {
+      return NextResponse.json({ error: "Missing transcript or jobId" }, { status: 400 })
     }
 
+    console.log("[v0] Transcript received, length:", finalTranscript?.length || 0)
+
     // In a production app, you would store this in a database
-    // For now, we'll just acknowledge receipt
-    // The client will poll /api/transcription-status to get the result
-
-    console.log("Received transcription callback:", { jobId, status, transcriptLength: transcript?.length })
-
+    // For now, we return the data for the client to handle
     return NextResponse.json({
       success: true,
-      message: "Callback received",
+      transcript: finalTranscript,
+      episodeTitle: episode_title,
+      transcriptionId: transcription_id,
+      metadata,
+      status: status || "completed",
+      jobId,
     })
   } catch (error) {
     console.error("Transcribe callback error:", error)

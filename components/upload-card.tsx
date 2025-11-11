@@ -9,21 +9,25 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Upload, File, X } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Upload, File, X, Copy, CheckCircle } from "lucide-react"
 import type { ActivityLogEntry } from "./dashboard-content"
 
 type UploadCardProps = {
-  onUploadComplete: (file: { url: string; filename: string; size: number }) => void
+  onUploadComplete: (file: { url: string; filename: string; size: number; webhookData?: any }) => void
   addLogEntry: (entry: Omit<ActivityLogEntry, "id" | "timestamp">) => void
 }
 
 export function UploadCard({ onUploadComplete, addLogEntry }: UploadCardProps) {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [processing, setProcessing] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState("")
   const [dragActive, setDragActive] = useState(false)
   const [directUrl, setDirectUrl] = useState("")
+  const [transcriptResponse, setTranscriptResponse] = useState<string>("")
+  const [copied, setCopied] = useState(false)
 
   const validateFile = (file: File) => {
     const validTypes = ["video/mp4", "video/quicktime", "audio/mpeg", "audio/mp3"]
@@ -78,79 +82,108 @@ export function UploadCard({ onUploadComplete, addLogEntry }: UploadCardProps) {
     setUploading(true)
     setUploadProgress(0)
     setError("")
+    setTranscriptResponse("")
 
     try {
       console.log("[v0] Starting upload for:", file.name)
 
-      console.log("[v0] Requesting presigned URL...")
-      setUploadProgress(5)
-
-      const urlResponse = await fetch("/api/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type,
-        }),
-      })
-
-      console.log("[v0] Presigned URL response status:", urlResponse.status)
-
-      if (!urlResponse.ok) {
-        let errorMsg = "Failed to get upload URL"
-        try {
-          const errorData = await urlResponse.json()
-          errorMsg = errorData.error || errorMsg
-        } catch {
-          // If response is not JSON, use status text
-          errorMsg = urlResponse.statusText || errorMsg
-        }
-        throw new Error(errorMsg)
-      }
-
-      const { uploadUrl, fileUrl } = await urlResponse.json()
-      console.log("[v0] Got presigned URL, uploading file...")
+      console.log("[v0] Uploading file via server proxy...")
       setUploadProgress(10)
 
-      const uploadResponse = await fetch(uploadUrl, {
+      const uploadResponse = await fetch("/api/upload", {
         method: "PUT",
         body: file,
         headers: {
           "Content-Type": file.type,
+          "X-Filename": file.name,
         },
       })
 
-      console.log("[v0] R2 upload response status:", uploadResponse.status)
-      setUploadProgress(90)
+      console.log("[v0] Upload response status:", uploadResponse.status)
+      setUploadProgress(70)
 
       if (!uploadResponse.ok) {
-        throw new Error("Failed to upload to R2")
+        let errorMsg = "Failed to upload file"
+        try {
+          const errorData = await uploadResponse.json()
+          errorMsg = errorData.error || errorMsg
+        } catch {
+          errorMsg = uploadResponse.statusText || errorMsg
+        }
+        throw new Error(errorMsg)
       }
 
+      const { fileUrl } = await uploadResponse.json()
       console.log("[v0] Upload successful! File URL:", fileUrl)
-      setUploadProgress(100)
+      setUploadProgress(80)
 
       addLogEntry({
         type: "upload",
         message: `File uploaded: ${file.name}`,
       })
 
+      console.log("[v0] Triggering transcription webhook...")
+      setUploading(false)
+      setProcessing(true)
+      setUploadProgress(85)
+
+      const webhookResponse = await fetch("/api/webhook/transcribe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          audio_url: fileUrl,
+          episode_title: file.name,
+          metadata: {
+            filename: file.name,
+            size: file.size,
+          },
+        }),
+      })
+
+      setUploadProgress(95)
+
+      if (!webhookResponse.ok) {
+        throw new Error("Failed to start transcription")
+      }
+
+      const webhookData = await webhookResponse.json()
+      console.log("[v0] Webhook triggered successfully:", webhookData)
+
+      let transcript = ""
+      if (webhookData.transcript) {
+        transcript = webhookData.transcript
+      } else if (Array.isArray(webhookData) && webhookData.length > 0) {
+        transcript = webhookData[0].transcript_text || webhookData[0].transcript || ""
+      }
+
+      if (transcript) {
+        setTranscriptResponse(transcript)
+        console.log("[v0] Transcript extracted, length:", transcript.length)
+      }
+
+      setUploadProgress(100)
+
+      addLogEntry({
+        type: "transcribe",
+        message: "Transcription completed",
+      })
+
       onUploadComplete({
         url: fileUrl,
         filename: file.name,
         size: file.size,
+        webhookData,
       })
 
-      // Reset form
-      setFile(null)
-      setUploadProgress(0)
+      setProcessing(false)
     } catch (err) {
       console.error("[v0] Upload failed:", err)
       const errorMessage = err instanceof Error ? err.message : "Upload failed"
       setError(errorMessage)
       addLogEntry({ type: "error", message: errorMessage })
+      setProcessing(false)
     } finally {
       setUploading(false)
     }
@@ -180,6 +213,16 @@ export function UploadCard({ onUploadComplete, addLogEntry }: UploadCardProps) {
     }
   }
 
+  const handleCopyTranscript = async () => {
+    try {
+      await navigator.clipboard.writeText(transcriptResponse)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error("[v0] Failed to copy:", err)
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -190,6 +233,45 @@ export function UploadCard({ onUploadComplete, addLogEntry }: UploadCardProps) {
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {processing && (
+          <Alert>
+            <AlertDescription className="flex items-center gap-2">
+              <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+              Processing file and starting transcription...
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {transcriptResponse && (
+          <Alert>
+            <AlertDescription className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="font-medium flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  Transcript Generated Successfully
+                </p>
+                <Button size="sm" variant="outline" onClick={handleCopyTranscript}>
+                  {copied ? (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+              <Textarea value={transcriptResponse} readOnly className="min-h-[200px] font-mono text-sm" />
+              <p className="text-xs text-muted-foreground">
+                {transcriptResponse.length} characters • {transcriptResponse.split(/\s+/).length} words
+              </p>
+            </AlertDescription>
           </Alert>
         )}
 
@@ -210,20 +292,22 @@ export function UploadCard({ onUploadComplete, addLogEntry }: UploadCardProps) {
                   <p className="font-medium">{file.name}</p>
                   <p className="text-sm text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setFile(null)} disabled={uploading}>
+                <Button variant="ghost" size="sm" onClick={() => setFile(null)} disabled={uploading || processing}>
                   <X className="h-4 w-4" />
                 </Button>
               </div>
 
-              {uploading && (
+              {(uploading || processing) && (
                 <div className="space-y-2">
                   <Progress value={uploadProgress} />
-                  <p className="text-sm text-muted-foreground">Uploading... {uploadProgress}%</p>
+                  <p className="text-sm text-muted-foreground">
+                    {processing ? "Processing..." : `Uploading... ${uploadProgress}%`}
+                  </p>
                 </div>
               )}
 
-              <Button onClick={handleUpload} disabled={uploading} className="w-full">
-                {uploading ? "Uploading..." : "Upload to R2"}
+              <Button onClick={handleUpload} disabled={uploading || processing} className="w-full">
+                {uploading ? "Uploading..." : processing ? "Processing..." : "Upload to R2"}
               </Button>
             </div>
           ) : (
@@ -256,9 +340,13 @@ export function UploadCard({ onUploadComplete, addLogEntry }: UploadCardProps) {
               placeholder="https://example.com/podcast.mp3"
               value={directUrl}
               onChange={(e) => setDirectUrl(e.target.value)}
-              disabled={uploading}
+              disabled={uploading || processing}
             />
-            <Button onClick={handleDirectUrlSubmit} disabled={!directUrl || uploading} variant="secondary">
+            <Button
+              onClick={handleDirectUrlSubmit}
+              disabled={!directUrl || uploading || processing}
+              variant="secondary"
+            >
               Add URL
             </Button>
           </div>

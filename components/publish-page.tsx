@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { getWorkflow } from "@/lib/workflow-store"
 import { Loader2, CheckCircle, ExternalLink, ArrowLeft, Send } from "lucide-react"
@@ -23,22 +22,47 @@ export function PublishPage({ workflowId }: { workflowId: string }) {
   const [published, setPublished] = useState(false)
   const [error, setError] = useState("")
   const [postUrl, setPostUrl] = useState("")
-  const [category, setCategory] = useState("Podcast")
-  const [tags, setTags] = useState("podcast, episode")
-  const [publishImmediately, setPublishImmediately] = useState(true)
 
   // Editable content
   const [seoTitle, setSeoTitle] = useState("")
-  const [blogPostHtml, setBlogPostHtml] = useState("")
-  const [showNotesHtml, setShowNotesHtml] = useState("")
+  const [blogPostMarkdown, setBlogPostMarkdown] = useState("")
+  const [showNotesMarkdown, setShowNotesMarkdown] = useState("")
+  const [primaryKeyword, setPrimaryKeyword] = useState("")
+  const [secondaryKeywords, setSecondaryKeywords] = useState("")
 
   useEffect(() => {
     if (!workflow || !workflow.generatedContent) {
       router.push("/dashboard")
     } else {
-      setSeoTitle(workflow.generatedContent.seoTitle)
-      setBlogPostHtml(workflow.generatedContent.blogPostHtml)
-      setShowNotesHtml(workflow.generatedContent.showNotesHtml)
+      // Check if user selected specific content on previous page
+      if (workflow.selectedContent?.seoTitle) {
+        setSeoTitle(workflow.selectedContent.seoTitle)
+      } else {
+        setSeoTitle(workflow.generatedContent.seoTitle || "")
+      }
+
+      if (workflow.selectedContent?.blogPostMarkdown) {
+        setBlogPostMarkdown(workflow.selectedContent.blogPostMarkdown)
+      } else {
+        setBlogPostMarkdown(workflow.generatedContent.blog_post?.markdown || "")
+      }
+
+      if (workflow.selectedContent?.showNotesMarkdown) {
+        setShowNotesMarkdown(workflow.selectedContent.showNotesMarkdown)
+      } else {
+        setShowNotesMarkdown("")
+      }
+
+      if (workflow.generatedContent.blog_post?.primary_keyword) {
+        setPrimaryKeyword(workflow.generatedContent.blog_post.primary_keyword)
+      }
+      if (workflow.generatedContent.blog_post?.secondary_keywords) {
+        setSecondaryKeywords(
+          Array.isArray(workflow.generatedContent.blog_post.secondary_keywords)
+            ? workflow.generatedContent.blog_post.secondary_keywords.join(", ")
+            : workflow.generatedContent.blog_post.secondary_keywords,
+        )
+      }
     }
   }, [workflow, router])
 
@@ -47,6 +71,23 @@ export function PublishPage({ workflowId }: { workflowId: string }) {
   }
 
   const handlePublish = async () => {
+    console.log("[v0] Publishing with data:", {
+      seoTitle,
+      blogPostLength: blogPostMarkdown.length,
+      primaryKeyword,
+      secondaryKeywords,
+    })
+
+    if (!seoTitle || !blogPostMarkdown) {
+      setError("Please fill in both SEO Title and Blog Post before publishing")
+      toast({
+        title: "Missing Fields",
+        description: "SEO Title and Blog Post are required",
+        variant: "destructive",
+      })
+      return
+    }
+
     setPublishing(true)
     setError("")
 
@@ -56,14 +97,12 @@ export function PublishPage({ workflowId }: { workflowId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           seo_title: seoTitle,
-          blog_post_html: blogPostHtml,
-          show_notes_html: showNotesHtml,
-          wordpress_category: category,
-          tags: tags
+          blog_post_markdown: blogPostMarkdown,
+          primary_keyword: primaryKeyword,
+          secondary_keywords: secondaryKeywords
             .split(",")
-            .map((t) => t.trim())
+            .map((k) => k.trim())
             .filter(Boolean),
-          publish_immediately: publishImmediately,
         }),
       })
 
@@ -149,68 +188,57 @@ export function PublishPage({ workflowId }: { workflowId: string }) {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="blog-post">Blog Post HTML</Label>
+                    <Label htmlFor="primary-keyword">Primary Keyword</Label>
+                    <Input
+                      id="primary-keyword"
+                      value={primaryKeyword}
+                      onChange={(e) => setPrimaryKeyword(e.target.value)}
+                      placeholder="Main SEO keyword..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="secondary-keywords">Secondary Keywords (comma-separated)</Label>
+                    <Input
+                      id="secondary-keywords"
+                      value={secondaryKeywords}
+                      onChange={(e) => setSecondaryKeywords(e.target.value)}
+                      placeholder="Related keywords, separated by commas..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="blog-post">Blog Post (Markdown)</Label>
                     <Textarea
                       id="blog-post"
-                      value={blogPostHtml}
-                      onChange={(e) => setBlogPostHtml(e.target.value)}
+                      value={blogPostMarkdown}
+                      onChange={(e) => setBlogPostMarkdown(e.target.value)}
                       className="min-h-[200px] font-mono text-sm"
-                      placeholder="Blog post content..."
+                      placeholder="Blog post content in markdown format..."
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="show-notes">Show Notes HTML</Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="show-notes">Show Notes (Markdown)</Label>
+                      <Badge variant="outline" className="text-xs">
+                        Not published yet
+                      </Badge>
+                    </div>
+                    <Alert className="bg-blue-50 border-blue-200">
+                      <AlertDescription className="text-blue-800 text-sm">
+                        <strong>Note:</strong> Show notes are for your reference only and won't be published to
+                        WordPress yet. This feature is coming soon.
+                      </AlertDescription>
+                    </Alert>
                     <Textarea
                       id="show-notes"
-                      value={showNotesHtml}
-                      onChange={(e) => setShowNotesHtml(e.target.value)}
-                      className="min-h-[200px] font-mono text-sm"
-                      placeholder="Show notes content..."
+                      value={showNotesMarkdown}
+                      onChange={(e) => setShowNotesMarkdown(e.target.value)}
+                      className="min-h-[150px] font-mono text-sm"
+                      placeholder="Show notes for reference (not published)..."
+                      disabled
                     />
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Publishing Settings */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Publishing Settings</CardTitle>
-                  <CardDescription>Configure WordPress publishing options</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="category">WordPress Category</Label>
-                    <Input
-                      id="category"
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      placeholder="Podcast"
-                      disabled={publishing}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="tags">Tags (comma-separated)</Label>
-                    <Input
-                      id="tags"
-                      value={tags}
-                      onChange={(e) => setTags(e.target.value)}
-                      placeholder="podcast, episode, audio"
-                      disabled={publishing}
-                    />
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="publish-immediately"
-                      checked={publishImmediately}
-                      onCheckedChange={(checked) => setPublishImmediately(checked === true)}
-                      disabled={publishing}
-                    />
-                    <Label htmlFor="publish-immediately" className="text-sm font-normal cursor-pointer">
-                      Publish immediately (uncheck to save as draft)
-                    </Label>
                   </div>
 
                   <Button onClick={handlePublish} disabled={publishing} className="w-full">
@@ -230,29 +258,160 @@ export function PublishPage({ workflowId }: { workflowId: string }) {
               </Card>
             </>
           ) : (
-            <Card>
-              <CardContent className="pt-6 space-y-4">
-                <Alert className="bg-green-50 border-green-200">
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                  <AlertDescription className="text-green-800">Successfully published to WordPress!</AlertDescription>
-                </Alert>
+            <>
+              <Card>
+                <CardContent className="pt-6 space-y-4">
+                  <Alert className="bg-green-50 border-green-200">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <AlertDescription className="text-green-800">Successfully published to WordPress!</AlertDescription>
+                  </Alert>
 
-                {postUrl && (
-                  <Button
-                    variant="outline"
-                    className="w-full bg-transparent"
-                    onClick={() => window.open(postUrl, "_blank")}
-                  >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View Published Post
+                  {postUrl && (
+                    <Button
+                      variant="outline"
+                      className="w-full bg-transparent"
+                      onClick={() => window.open(postUrl, "_blank")}
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      View Published Post
+                    </Button>
+                  )}
+
+                  <Button variant="default" className="w-full" onClick={() => router.push("/dashboard")}>
+                    Return to Dashboard
                   </Button>
-                )}
+                </CardContent>
+              </Card>
 
-                <Button variant="default" className="w-full" onClick={() => router.push("/dashboard")}>
-                  Return to Dashboard
-                </Button>
-              </CardContent>
-            </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>SEO Optimization Checklist</CardTitle>
+                  <CardDescription>
+                    Complete these steps in WordPress to optimize your post (10 minutes)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-4 text-sm">
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-semibold text-amber-900 mb-1">1. SET FOCUS KEYWORD (30 sec) ⭐⭐⭐</div>
+                          <div className="text-amber-800 space-y-1">
+                            <div>→ RankMath panel → Focus Keyword field</div>
+                            <div>→ Paste: [{primaryKeyword || "your keyword"}]</div>
+                            <div className="text-xs italic">Impact: Score 40 → 65</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-semibold text-blue-900 mb-1">
+                            2. UPLOAD FEATURED IMAGE (2 min) ⭐⭐⭐
+                          </div>
+                          <div className="text-blue-800 space-y-1">
+                            <div>→ Unsplash.com → Search keyword</div>
+                            <div>→ Download 1200x630px</div>
+                            <div>→ Set as Featured Image</div>
+                            <div>→ Alt text = focus keyword</div>
+                            <div className="text-xs italic">Impact: Score 65 → 75</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-semibold text-purple-900 mb-1">
+                            3. ADD 2-3 EXTERNAL LINKS (3 min) ⭐⭐
+                          </div>
+                          <div className="text-purple-800 space-y-1">
+                            <div>→ Link statistics to sources</div>
+                            <div>→ Use: McKinsey, HBR, Gartner</div>
+                            <div className="text-xs italic">Impact: +5-10 points</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-semibold text-green-900 mb-1">
+                            4. ADD 2-3 INTERNAL LINKS (2 min) ⭐⭐
+                          </div>
+                          <div className="text-green-800 space-y-1">
+                            <div>→ Link to related blog posts</div>
+                            <div>→ Link to service pages</div>
+                            <div className="text-xs italic">Impact: Better site structure</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-semibold text-slate-900 mb-1">5. SET CATEGORIES (30 sec) ⭐</div>
+                          <div className="text-slate-800 space-y-1">
+                            <div>→ Choose 1-2: AI Strategy, Implementation</div>
+                            <div>→ Don't use "Uncategorized"</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-semibold text-indigo-900 mb-1">6. ADD TAGS (1 min) ⭐</div>
+                          <div className="text-indigo-800 space-y-1">
+                            <div>→ Add 3-5: {secondaryKeywords || "related keywords"}</div>
+                            <div>→ Use existing tags when possible</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-semibold text-orange-900 mb-1">7. QUICK REVIEW (2 min) ⭐⭐</div>
+                          <div className="text-orange-800 space-y-1">
+                            <div>→ Scan headings</div>
+                            <div>→ Fix obvious typos</div>
+                            <div>→ Verify accuracy</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-gradient-to-r from-green-100 to-emerald-100 border-2 border-green-400 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1" />
+                        <div>
+                          <div className="font-bold text-green-900 text-base mb-1">8. PUBLISH! 🚀</div>
+                          <div className="text-green-800 space-y-1">
+                            <div>→ Target RankMath: 75-85/100</div>
+                            <div>→ Total time: 10 minutes</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
           )}
         </div>
       </main>

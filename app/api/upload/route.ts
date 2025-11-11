@@ -3,8 +3,76 @@ export const maxDuration = 300 // 5 minutes for large uploads
 
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyAuth } from "@/lib/auth"
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+
+async function createPresignedUrl(
+  bucket: string,
+  key: string,
+  accountId: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  contentType: string,
+  expiresIn = 3600,
+): Promise<string> {
+  const region = "auto"
+  const service = "s3"
+  const method = "PUT"
+  const endpoint = `https://${accountId}.r2.cloudflarestorage.com`
+  const host = `${accountId}.r2.cloudflarestorage.com`
+
+  const now = new Date()
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "")
+  const dateStamp = amzDate.substring(0, 8)
+
+  const canonicalUri = `/${bucket}/${key}`
+  const canonicalQuerystring = [
+    `X-Amz-Algorithm=AWS4-HMAC-SHA256`,
+    `X-Amz-Credential=${encodeURIComponent(`${accessKeyId}/${dateStamp}/${region}/${service}/aws4_request`)}`,
+    `X-Amz-Date=${amzDate}`,
+    `X-Amz-Expires=${expiresIn}`,
+    `X-Amz-SignedHeaders=host`,
+  ].join("&")
+
+  const canonicalHeaders = `host:${host}\n`
+  const signedHeaders = "host"
+  const payloadHash = "UNSIGNED-PAYLOAD"
+
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQuerystring,
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join("\n")
+
+  const encoder = new TextEncoder()
+  const canonicalRequestHash = await crypto.subtle.digest("SHA-256", encoder.encode(canonicalRequest))
+  const canonicalRequestHashHex = Array.from(new Uint8Array(canonicalRequestHash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, credentialScope, canonicalRequestHashHex].join("\n")
+
+  async function hmac(key: Uint8Array | string, data: string): Promise<Uint8Array> {
+    const keyData = typeof key === "string" ? encoder.encode(key) : key
+    const cryptoKey = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+    const signature = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(data))
+    return new Uint8Array(signature)
+  }
+
+  const kDate = await hmac(`AWS4${secretAccessKey}`, dateStamp)
+  const kRegion = await hmac(kDate, region)
+  const kService = await hmac(kRegion, service)
+  const kSigning = await hmac(kService, "aws4_request")
+  const signature = await hmac(kSigning, stringToSign)
+
+  const signatureHex = Array.from(signature)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+
+  return `${endpoint}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signatureHex}`
+}
 
 export async function POST(request: NextRequest) {
   console.log("[Upload API] Request received")
@@ -67,32 +135,8 @@ export async function POST(request: NextRequest) {
     const key = `podcasts/${timestamp}-${sanitizedFilename}`
     console.log("[Upload API] Generated key:", key)
 
-    // Initialize S3 client for CloudFlare R2
-    const s3Client = new S3Client({
-      region: "auto",
-      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-      // CloudFlare R2 doesn't support checksum validation in serverless environment
-      requestChecksumCalculation: "WHEN_REQUIRED",
-    })
-
-    console.log("[Upload API] S3 Client initialized")
-
-    // Create presigned URL for upload
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      ContentType: contentType,
-      ChecksumAlgorithm: undefined, // Disable checksum for R2 compatibility
-    })
-
-    console.log("[Upload API] Generating presigned URL...")
-    const uploadUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 3600, // 1 hour
-    })
+    console.log("[Upload API] Generating presigned URL with Web Crypto...")
+    const uploadUrl = await createPresignedUrl(bucket, key, accountId, accessKeyId, secretAccessKey, contentType, 3600)
 
     console.log("[Upload API] Presigned URL generated successfully")
 
@@ -108,7 +152,9 @@ export async function POST(request: NextRequest) {
       // Fallback to R2 public endpoint (requires Public Access enabled)
       // Note: This won't work if bucket is private - you MUST set S3_PUBLIC_URL
       fileUrl = `https://pub-${accountId}.r2.dev/${key}`
-      console.warn("[Upload API] WARNING: S3_PUBLIC_URL not set, using R2 public URL (this may not work if bucket is private)")
+      console.warn(
+        "[Upload API] WARNING: S3_PUBLIC_URL not set, using R2 public URL (this may not work if bucket is private)",
+      )
       console.log("[Upload API] Fallback URL:", fileUrl)
     }
 
@@ -120,7 +166,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error("[Upload API] Error:", error)
-    
+
     // Enhanced error logging
     if (error instanceof Error) {
       console.error("[Upload API] Error name:", error.name)
@@ -130,12 +176,89 @@ export async function POST(request: NextRequest) {
 
     const errMsg = error instanceof Error ? error.message : String(error)
     return NextResponse.json(
-      { 
-        error: `Upload failed: ${errMsg}`, 
+      {
+        error: `Upload failed: ${errMsg}`,
         success: false,
-        details: error instanceof Error ? error.stack : undefined
-      }, 
-      { status: 500 }
+        details: error instanceof Error ? error.stack : undefined,
+      },
+      { status: 500 },
+    )
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  console.log("[Upload API] PUT request received for direct upload")
+
+  try {
+    const auth = await verifyAuth()
+    if (!auth) {
+      console.log("[Upload API] Authentication failed")
+      return NextResponse.json({ error: "Unauthorized", success: false }, { status: 401 })
+    }
+
+    const contentType = request.headers.get("content-type") || "application/octet-stream"
+    const filename = request.headers.get("x-filename") || "upload"
+
+    console.log("[Upload API] Direct upload details:", { filename, contentType })
+
+    // Get environment variables
+    const bucket = process.env.S3_BUCKET
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID
+    const accessKeyId = process.env.AWS_ACCESS_KEY_ID
+    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
+    const publicUrl = process.env.S3_PUBLIC_URL
+
+    if (!bucket || !accountId || !accessKeyId || !secretAccessKey) {
+      return NextResponse.json({ error: "Server configuration missing", success: false }, { status: 500 })
+    }
+
+    // Generate unique key
+    const timestamp = Date.now()
+    const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, "_")
+    const key = `podcasts/${timestamp}-${sanitizedFilename}`
+
+    console.log("[Upload API] Uploading to R2 with key:", key)
+
+    // Generate presigned URL for server-side upload
+    const uploadUrl = await createPresignedUrl(bucket, key, accountId, accessKeyId, secretAccessKey, contentType, 300)
+
+    // Upload file to R2
+    const fileBuffer = await request.arrayBuffer()
+    console.log("[Upload API] File size:", fileBuffer.byteLength, "bytes")
+
+    const r2Response = await fetch(uploadUrl, {
+      method: "PUT",
+      body: fileBuffer,
+      headers: {
+        "Content-Type": contentType,
+      },
+    })
+
+    if (!r2Response.ok) {
+      const errorText = await r2Response.text()
+      console.error("[Upload API] R2 upload failed:", r2Response.status, errorText)
+      throw new Error(`R2 upload failed: ${r2Response.status}`)
+    }
+
+    console.log("[Upload API] File uploaded successfully to R2")
+
+    // Generate public file URL
+    const fileUrl = publicUrl ? `${publicUrl.replace(/\/$/, "")}/${key}` : `https://pub-${accountId}.r2.dev/${key}`
+
+    return NextResponse.json({
+      fileUrl,
+      key,
+      success: true,
+    })
+  } catch (error) {
+    console.error("[Upload API] PUT Error:", error)
+    const errMsg = error instanceof Error ? error.message : String(error)
+    return NextResponse.json(
+      {
+        error: `Upload failed: ${errMsg}`,
+        success: false,
+      },
+      { status: 500 },
     )
   }
 }

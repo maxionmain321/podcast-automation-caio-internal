@@ -3,7 +3,6 @@ import { verifyAuth } from "@/lib/auth"
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
     const auth = await verifyAuth()
     if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -23,7 +22,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Content generation webhook not configured" }, { status: 500 })
     }
 
-    // Proxy request to n8n webhook
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: {
@@ -43,15 +41,22 @@ export async function POST(request: NextRequest) {
       throw new Error("Content generation service error")
     }
 
-    const data = await response.json()
+    const rawData = await response.json()
 
-    // Validate response structure
-    if (!data.seo_title || !data.blog_post_html || !data.show_notes_html) {
+    const data = Array.isArray(rawData) ? rawData[0] : rawData
+
+    if (!data.success || !data.titles || !data.blog_post || !data.show_notes) {
       console.error("Invalid n8n response structure:", data)
       throw new Error("Invalid response from content generation service")
     }
 
-    return NextResponse.json(data)
+    return NextResponse.json({
+      success: true,
+      titles: data.titles,
+      blog_post: data.blog_post,
+      show_notes: data.show_notes,
+      metadata: data.metadata,
+    })
   } catch (error) {
     console.error("Generate webhook error:", error)
     return NextResponse.json({ error: "Failed to generate content" }, { status: 500 })
