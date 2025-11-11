@@ -1,5 +1,5 @@
 export const runtime = "nodejs"
-export const maxDuration = 300 // 5 minutes for large uploads
+export const maxDuration = 60 // Maximum allowed on Vercel
 
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyAuth } from "@/lib/auth"
