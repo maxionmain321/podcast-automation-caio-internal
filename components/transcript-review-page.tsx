@@ -31,8 +31,7 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
     blogPostMarkdown?: string
     showNotesMarkdown?: string
   }>({})
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [pollingForContent, setPollingForContent] = useState(false)
+  const [pollingGeneration, setPollingGeneration] = useState(false)
 
   useEffect(() => {
     const loadedWorkflow = getWorkflow(workflowId)
@@ -89,41 +88,62 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
   }, [workflow, workflowId, isPolling])
 
   useEffect(() => {
+    if (!workflow?.transcript && isPolling) {
+      const pollInterval = setInterval(() => {
+        const updatedWorkflow = getWorkflow(workflowId)
+        console.log("[v0] Polling for transcript update...", updatedWorkflow?.transcript?.length || 0)
+
+        if (updatedWorkflow?.transcript) {
+          console.log("[v0] Transcript found! Length:", updatedWorkflow.transcript.length)
+          setWorkflow(updatedWorkflow)
+          setIsPolling(false)
+          clearInterval(pollInterval)
+        }
+      }, 2000)
+
+      setTimeout(() => {
+        clearInterval(pollInterval)
+        setIsPolling(false)
+      }, 120000)
+
+      return () => clearInterval(pollInterval)
+    }
+  }, [workflow, workflowId, isPolling])
+
+  useEffect(() => {
+    if (pollingGeneration && generating) {
+      const pollInterval = setInterval(() => {
+        const updatedWorkflow = getWorkflow(workflowId)
+        console.log("[v0] Polling for content generation...", !!updatedWorkflow?.generatedContent)
+
+        if (updatedWorkflow?.generatedContent) {
+          console.log("[v0] Content generation complete!")
+          setWorkflow(updatedWorkflow)
+          setGenerating(false)
+          setPollingGeneration(false)
+          clearInterval(pollInterval)
+        }
+      }, 3000) // Poll every 3 seconds
+
+      // Stop polling after 5 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval)
+        setPollingGeneration(false)
+        if (generating) {
+          setGenerating(false)
+          setError("Content generation timed out. Please try again.")
+        }
+      }, 300000)
+
+      return () => clearInterval(pollInterval)
+    }
+  }, [pollingGeneration, generating, workflowId])
+
+  useEffect(() => {
     if (!workflow) {
       router.push("/dashboard")
     }
   }, [workflow, router])
-
-  useEffect(() => {
-    if (pollingForContent) {
-      const pollInterval = setInterval(() => {
-        const updatedWorkflow = getWorkflow(workflowId)
-        console.log("[v0] Polling for generated content...", !!updatedWorkflow?.generatedContent)
-
-        if (updatedWorkflow?.generatedContent) {
-          console.log("[v0] Generated content found!")
-          setWorkflow(updatedWorkflow)
-          setPollingForContent(false)
-          setGenerating(false)
-          clearInterval(pollInterval)
-
-          toast({
-            title: "Content generated!",
-            description: "Your blog post and show notes are ready.",
-          })
-        }
-      }, 3000) // Poll every 3 seconds
-
-      setTimeout(() => {
-        clearInterval(pollInterval)
-        setPollingForContent(false)
-        setGenerating(false)
-        setError("Content generation is taking longer than expected. Please try regenerating.")
-      }, 300000) // Stop polling after 5 minutes
-
-      return () => clearInterval(pollInterval)
-    }
-  }, [pollingForContent, workflowId])
 
   if (!workflow) {
     return null
@@ -150,6 +170,7 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
 
   const handleGenerateContent = async () => {
     setGenerating(true)
+    setPollingGeneration(true)
     setError("")
 
     try {
@@ -159,7 +180,7 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
         body: JSON.stringify({
           transcript_text: workflow.transcript,
           episode_title: episodeTitle || "Untitled Episode",
-          workflow_id: workflowId, // Send workflow ID
+          workflowId: workflow.id,
           metadata: {
             transcript_length: workflow.transcript.length,
             word_count: workflow.transcript.split(/\s+/).length,
@@ -175,13 +196,14 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
       const data = await response.json()
 
       if (data.status === "processing") {
-        console.log("[v0] Content generation started, polling for results...")
-        setPollingForContent(true)
+        // Content generation started, polling will handle the rest
+        console.log("[v0] Content generation in progress...")
         toast({
-          title: "Generating content...",
-          description: "This may take 1-2 minutes. You'll be notified when it's ready.",
+          title: "Processing",
+          description: "Generating content... This may take a few minutes.",
         })
       } else {
+        // Immediate response (legacy support)
         const updatedWorkflow = {
           ...workflow,
           generatedContent: data,
@@ -189,12 +211,13 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
         setWorkflow(updatedWorkflow)
         saveWorkflow(updatedWorkflow)
         setGenerating(false)
+        setPollingGeneration(false)
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Content generation failed"
       setError(errorMessage)
       setGenerating(false)
-      setPollingForContent(false)
+      setPollingGeneration(false)
     }
   }
 
@@ -482,12 +505,6 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
                     Generated
                   </Badge>
                 )}
-                {pollingForContent && (
-                  <Badge variant="outline">
-                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                    Processing...
-                  </Badge>
-                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -497,19 +514,18 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
                 </Alert>
               )}
 
-              {pollingForContent && (
-                <Alert>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <AlertDescription>
-                    Generating content with AI... This typically takes 1-2 minutes. You can wait here or come back
-                    later.
-                  </AlertDescription>
-                </Alert>
-              )}
-
               {!workflow.transcriptApproved && (
                 <Alert>
                   <AlertDescription>Please approve the transcript first before generating content.</AlertDescription>
+                </Alert>
+              )}
+
+              {generating && pollingGeneration && (
+                <Alert>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <AlertDescription>
+                    Generating content... This may take 2-3 minutes. Feel free to wait or come back later.
+                  </AlertDescription>
                 </Alert>
               )}
 

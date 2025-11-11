@@ -265,25 +265,17 @@ Body:
 
 **Note**: The app automatically polls for transcript updates every 2 seconds after redirecting to the transcript page, so both synchronous and asynchronous approaches work.
 
-### 2. Generate Webhook (Asynchronous)
-
-**⚠️ IMPORTANT**: The content generation workflow is **asynchronous** to handle long-running AI processing that may take several minutes.
+### 2. Generate Webhook
 
 **Endpoint**: `N8N_GENERATE_WEBHOOK`
 
-**How It Works**:
-1. App triggers n8n webhook and returns immediately
-2. UI shows "Processing..." state and polls for completion
-3. n8n processes content (can take 1-5 minutes)
-4. n8n POSTs completed content to callback endpoint
-5. UI detects completion and displays results
-
-**Request Format (App → n8n)**:
+**Request Format**:
 \`\`\`json
 {
   "transcript_text": "Full transcript...",
   "episode_title": "Episode Title",
-  "workflow_id": "workflow_1234567890_abc123",
+  "workflowId": "workflow_123_abc",
+  "callback_url": "https://your-app.vercel.app/api/webhook/generate-callback",
   "metadata": {
     "transcript_length": 5000,
     "word_count": 850
@@ -291,20 +283,31 @@ Body:
 }
 \`\`\`
 
-**Response Format (n8n → Callback Endpoint)**:
+**Response Format** (Asynchronous - Recommended):
 
-Your n8n workflow MUST POST the results to:
-- **URL**: `https://your-app-url.vercel.app/api/webhook/generate-callback`
-- **Method**: POST
-- **Headers**:
-  - `Content-Type: application/json`
-  - `X-Callback-Secret: your-callback-secret` (optional but recommended)
-
-**Callback Payload**:
+The webhook should return immediately:
 \`\`\`json
 {
-  "workflow_id": "workflow_1234567890_abc123",
   "success": true,
+  "status": "processing",
+  "message": "Content generation started"
+}
+\`\`\`
+
+**Then POST results to the callback URL** when complete:
+
+**Callback URL**: `POST https://your-app.vercel.app/api/webhook/generate-callback`
+
+**Headers**:
+\`\`\`
+Content-Type: application/json
+\`\`\`
+
+**Body**:
+\`\`\`json
+{
+  "success": true,
+  "workflowId": "workflow_123_abc",
   "titles": {
     "blog_titles": [
       "Title Option 1",
@@ -322,50 +325,42 @@ Your n8n workflow MUST POST the results to:
     ]
   },
   "blog_post": {
-    "markdown": "# Blog Post\n\nContent here...",
-    "word_count": 1500,
-    "reading_time": "7 min"
+    "markdown": "# Blog Title\n\n## Introduction\n\nContent here...",
+    "word_count": 1200,
+    "reading_time": "6 min"
   },
   "show_notes": {
-    "episode_summary": "Summary text...",
-    "key_topics_discussed": ["Topic 1", "Topic 2"],
-    "key_takeaways": ["Takeaway 1", "Takeaway 2"],
+    "episode_summary": "Summary of the episode...",
+    "key_topics_discussed": ["Topic 1", "Topic 2", "Topic 3"],
+    "key_takeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3"],
     "notable_quotes": ["Quote 1", "Quote 2"],
     "timestamps": [
-      {
-        "time": "00:00",
-        "topic": "Introduction",
-        "description": "Brief intro"
-      }
+      {"time": "00:00", "topic": "Introduction"},
+      {"time": "05:30", "topic": "Main topic discussion"}
     ]
   },
   "metadata": {
-    "primary_keyword": "main keyword",
-    "secondary_keywords": ["keyword1", "keyword2"]
+    "primary_keyword": "main topic keyword",
+    "secondary_keywords": ["keyword 1", "keyword 2", "keyword 3"]
   }
 }
 \`\`\`
 
-**n8n Workflow Setup**:
-1. **Webhook Trigger**: Receive the initial request with `workflow_id`
-2. **AI Processing**: Generate content (this can take minutes)
-3. **HTTP Request Node**: POST results to callback endpoint
-   - URL: `https://your-app.vercel.app/api/webhook/generate-callback`
-   - Method: POST
-   - Body: Include all fields from callback payload above
-   - **Critical**: Include the same `workflow_id` from step 1
+**Why Asynchronous?**
 
-**Client-Side Polling**:
-- The UI polls localStorage every 3 seconds
-- Maximum polling time: 5 minutes
-- User sees "Generating content..." with spinner
-- Toast notification when content is ready
+Content generation with Claude typically takes 2-5 minutes. Waiting for the response causes timeout errors (Error 524). By using the callback pattern:
+- The webhook returns immediately, preventing timeouts
+- The app polls for updates every 3 seconds
+- Users can wait or navigate away and come back later
+- No timeout or connection errors
 
-**Why Asynchronous?**:
-- AI content generation can take 1-5 minutes
-- Vercel function timeout is 60 seconds on free tier
-- Cloudflare times out long-running requests (524 error)
-- Asynchronous approach prevents timeouts and improves UX
+**n8n Implementation**:
+
+1. Your n8n workflow receives the generate request
+2. Immediately respond with `{"success": true, "status": "processing"}`
+3. Process the content generation (Claude API calls)
+4. When complete, use an HTTP Request node to POST to the callback URL
+5. Include the `workflowId` so the app knows which workflow to update
 
 ### 3. Publish Webhook
 
@@ -376,7 +371,7 @@ Your n8n workflow MUST POST the results to:
 {
   "seo_title": "Episode Title",
   "blog_post_html": "<h1>Title</h1><p>Content...</p>",
-  "show_notes_html": "<ul><li>Note 1</li><li>Note 2</li></ul>",
+  "show_notes_html": "<ul><li>Note 1</li></ul>",
   "wordpress_category": "Podcast",
   "tags": ["podcast", "episode"],
   "publish_immediately": true
