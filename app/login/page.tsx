@@ -1,13 +1,18 @@
 import { LoginForm } from "@/components/login-form"
 import { redirect } from "next/navigation"
 import { cookies } from "next/headers"
+import { jwtVerify } from "jose"
 
 export default async function LoginPage() {
   const cookieStore = await cookies()
   const session = cookieStore.get("session")
 
   if (session) {
-    redirect("/dashboard")
+    try {
+      const secret = new TextEncoder().encode(process.env.JWT_SECRET || "your-secret-key-change-in-production")
+      await jwtVerify(session.value, secret)
+      redirect("/dashboard")
+    } catch (error) {}
   }
 
   return (
