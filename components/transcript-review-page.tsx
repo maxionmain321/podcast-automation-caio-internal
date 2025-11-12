@@ -88,40 +88,35 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
   }, [workflow, workflowId, isPolling])
 
   useEffect(() => {
-    if (!workflow?.transcript && isPolling) {
-      const pollInterval = setInterval(() => {
-        const updatedWorkflow = getWorkflow(workflowId)
-        console.log("[v0] Polling for transcript update...", updatedWorkflow?.transcript?.length || 0)
-
-        if (updatedWorkflow?.transcript) {
-          console.log("[v0] Transcript found! Length:", updatedWorkflow.transcript.length)
-          setWorkflow(updatedWorkflow)
-          setIsPolling(false)
-          clearInterval(pollInterval)
-        }
-      }, 2000)
-
-      setTimeout(() => {
-        clearInterval(pollInterval)
-        setIsPolling(false)
-      }, 120000)
-
-      return () => clearInterval(pollInterval)
-    }
-  }, [workflow, workflowId, isPolling])
-
-  useEffect(() => {
     if (pollingGeneration && generating) {
-      const pollInterval = setInterval(() => {
-        const updatedWorkflow = getWorkflow(workflowId)
-        console.log("[v0] Polling for content generation...", !!updatedWorkflow?.generatedContent)
+      const pollInterval = setInterval(async () => {
+        console.log("[v0] Polling for content generation...")
 
-        if (updatedWorkflow?.generatedContent) {
-          console.log("[v0] Content generation complete!")
-          setWorkflow(updatedWorkflow)
-          setGenerating(false)
-          setPollingGeneration(false)
-          clearInterval(pollInterval)
+        try {
+          const response = await fetch(`/api/content-status?workflowId=${workflow.id}`)
+          const data = await response.json()
+
+          if (data.status === "completed" && data.data) {
+            console.log("[v0] Content generation complete!")
+
+            const updatedWorkflow = {
+              ...workflow,
+              generatedContent: data.data,
+            }
+
+            setWorkflow(updatedWorkflow)
+            saveWorkflow(updatedWorkflow)
+            setGenerating(false)
+            setPollingGeneration(false)
+            clearInterval(pollInterval)
+
+            toast({
+              title: "Success",
+              description: "Content generated successfully!",
+            })
+          }
+        } catch (error) {
+          console.error("[v0] Polling error:", error)
         }
       }, 3000) // Poll every 3 seconds
 
@@ -137,7 +132,7 @@ export function TranscriptReviewPage({ workflowId }: { workflowId: string }) {
 
       return () => clearInterval(pollInterval)
     }
-  }, [pollingGeneration, generating, workflowId])
+  }, [pollingGeneration, generating, workflow])
 
   useEffect(() => {
     if (!workflow) {
